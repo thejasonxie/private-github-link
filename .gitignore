@@ -1,0 +1,23 @@
+node_modules
+.DS_Store
+dist
+dist-ssr
+*.local
+count.txt
+.env
+.nitro
+.tanstack
+.wrangler
+.output
+.vinxi
+todos.json
+
+# sst
+.sst
+
+# AI agent/tool configs (local development)
+.agents
+.opencode
+
+# Test coverage
+coverage
