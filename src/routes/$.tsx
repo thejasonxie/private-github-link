@@ -368,6 +368,7 @@ function RouteComponent() {
 				currentBranch &&
 				repoInfo,
 		),
+		retry: false,
 	});
 
 	// Fetch file content
@@ -396,6 +397,7 @@ function RouteComponent() {
 		enabled: Boolean(
 			isFileView && currentPath && owner && repo && currentBranch && repoInfo,
 		),
+		retry: false,
 	});
 
 	// Fetch total commit count for the repo
@@ -524,24 +526,35 @@ function RouteComponent() {
 
 	const branchNames = branchesData?.map((b) => b.name) ?? [];
 	const isContentLoading = isFileView ? isFileLoading : isDirectoryLoading;
-
-	// Show loading state while fetching initial data for unauthenticated users
-	if (isInitialLoading) {
-		return <RepoPending />;
-	}
-
 	// Check for rate limit errors first (more specific than not-found)
 	const isRateLimitErr = (error: Error | null) => {
 		if (!error) return false;
 		if (error instanceof RateLimitError) return true;
+		if (error.name === "RateLimitError") return true;
 		return error.message?.toLowerCase().includes("rate limit");
 	};
+
+	// Check for rate limit errors in mutation errors (tree expansion)
+	const hasTreeMutationRateLimitError = React.useMemo(() => {
+		for (const errorMessage of errorPaths.values()) {
+			if (errorMessage.toLowerCase().includes("rate limit")) {
+				return true;
+			}
+		}
+		return false;
+	}, [errorPaths]);
 
 	const clientRateLimitError =
 		isRateLimitErr(repoInfoError as Error | null) ||
 		isRateLimitErr(branchesError as Error | null) ||
 		isRateLimitErr(fileError as Error | null) ||
-		isRateLimitErr(directoryError as Error | null);
+		isRateLimitErr(directoryError as Error | null) ||
+		hasTreeMutationRateLimitError;
+
+	// Show loading state while fetching initial data for unauthenticated users
+	if (isInitialLoading) {
+		return <RepoPending />;
+	}
 
 	if (clientRateLimitError) {
 		return (
