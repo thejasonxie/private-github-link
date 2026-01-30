@@ -95,8 +95,8 @@ export function RepoHeader({
 	const [copied, setCopied] = React.useState<string | null>(null);
 
 	const { data: user } = useQuery({
-		queryKey: ["getUser", repo.owner],
-		queryFn: async () => await getUser(repo.owner),
+		queryKey: ["getUser", repo.owner, accessToken],
+		queryFn: async () => await getUser(repo.owner, accessToken),
 	});
 
 	const handleCopy = async (text: string, type: string) => {

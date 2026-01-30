@@ -27,7 +27,9 @@ export function parseRepoPath(splatPath: string): ParsedRepoPath | null {
 		return null;
 	}
 
-	const branch = rest[0] || "main";
+	// Only set branch if explicitly provided in URL
+	// Don't default to "main" - let the component use repoInfo.defaultBranch
+	const branch = rest[0] || "";
 	const path = rest.slice(1).join("/");
 
 	return {

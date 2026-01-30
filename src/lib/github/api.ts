@@ -948,24 +948,29 @@ export async function getTotalCommitCount(
 	}
 }
 
-export async function getUser(username: string): Promise<GitHubUser> {
-	const octokit = createGitHubClient();
+export async function getUser(
+	username: string,
+	token?: string,
+): Promise<GitHubUser> {
+	const octokit = createGitHubClient(token);
 
 	try {
 		const response = await octokit.request("GET /users/{username}", {
 			username,
+			headers: GITHUB_API_HEADERS,
 		});
 
-		// Extract and notify rate limit headers (unauthenticated)
+		// Extract and notify rate limit headers
 		const rateLimitHeaders = extractRateLimitHeaders(response.headers);
-		notifyRateLimitHeaders(rateLimitHeaders, undefined);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
 
 		return response.data;
 	} catch (error) {
-		console.error("Failed to fetch commit count:", error);
+		console.error("Failed to fetch user:", error);
 		throw error;
 	}
 }
+
 export async function getAuthenticatedUser(token: string): Promise<GitHubUser> {
 	const octokit = createGitHubClient(token);
 

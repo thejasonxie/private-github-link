@@ -120,7 +120,9 @@ function RouteComponent() {
 	});
 
 	// Determine branch from URL or default
-	const currentBranch = parsed?.branch || repoInfo?.defaultBranch || "main";
+	// IMPORTANT: Don't fallback to "main" - wait for repoInfo to provide the actual default branch
+	// This prevents issues with repos that use different default branches (e.g., "canary" for vercel/next.js)
+	const currentBranch = parsed?.branch || repoInfo?.defaultBranch;
 	const viewType = parsed?.viewType || "tree";
 	const currentPath = parsed?.path || "";
 
@@ -161,8 +163,16 @@ function RouteComponent() {
 		error: treeError,
 	} = useQuery({
 		queryKey: ["getDirectoryTree", owner, repo, currentBranch, "", githubToken],
-		queryFn: () =>
-			getDirectoryTree(owner, repo, currentBranch, "", githubToken),
+		queryFn: () => {
+			// currentBranch is guaranteed to be defined when enabled=true
+			return getDirectoryTree(
+				owner,
+				repo,
+				currentBranch as string,
+				"",
+				githubToken,
+			);
+		},
 		enabled: Boolean(owner && repo && currentBranch && repoInfo),
 		staleTime: CACHE_FIVE_MINUTES,
 		retry: false,
@@ -216,10 +226,12 @@ function RouteComponent() {
 			});
 			try {
 				// Use refs to always get latest values
+				// currentBranchRef.current is guaranteed to be defined because the mutation
+				// is only triggered from UI interactions after the branch is loaded
 				const result = await getDirectoryTree(
 					ownerRef.current,
 					repoRef.current,
-					currentBranchRef.current,
+					currentBranchRef.current as string,
 					path,
 					githubTokenRef.current,
 				);
@@ -345,11 +357,16 @@ function RouteComponent() {
 				owner,
 				repo,
 				currentPath,
-				currentBranch,
+				currentBranch as string,
 				githubToken,
 			),
 		enabled: Boolean(
-			!isFileView && !isCommitsView && owner && repo && repoInfo,
+			!isFileView &&
+				!isCommitsView &&
+				owner &&
+				repo &&
+				currentBranch &&
+				repoInfo,
 		),
 	});
 
@@ -372,17 +389,20 @@ function RouteComponent() {
 				owner,
 				repo,
 				currentPath,
-				currentBranch,
+				currentBranch as string,
 				selectedFile?.size,
 				githubToken,
 			),
-		enabled: Boolean(isFileView && currentPath && owner && repo && repoInfo),
+		enabled: Boolean(
+			isFileView && currentPath && owner && repo && currentBranch && repoInfo,
+		),
 	});
 
 	// Fetch total commit count for the repo
 	const { data: totalCommitCount } = useQuery({
 		queryKey: ["getTotalCommitCount", owner, repo, currentBranch, githubToken],
-		queryFn: () => getTotalCommitCount(owner, repo, currentBranch, githubToken),
+		queryFn: () =>
+			getTotalCommitCount(owner, repo, currentBranch as string, githubToken),
 		enabled: Boolean(currentBranch && owner && repo && repoInfo),
 	});
 
@@ -402,12 +422,14 @@ function RouteComponent() {
 				owner,
 				repo,
 				currentPath,
-				currentBranch,
+				currentBranch as string,
 				historyPage,
 				30,
 				githubToken,
 			),
-		enabled: Boolean(isCommitsView && owner && repo && repoInfo),
+		enabled: Boolean(
+			isCommitsView && currentBranch && owner && repo && repoInfo,
+		),
 	});
 
 	// Handle branch change - navigate to tree view of root with new branch
@@ -420,12 +442,14 @@ function RouteComponent() {
 
 	// Handle showing commit history
 	const handleShowHistory = React.useCallback(() => {
+		if (!currentBranch) return;
 		setHistoryPage(1);
 		navigateTo("commits", currentBranch, currentPath);
 	}, [navigateTo, currentBranch, currentPath]);
 
 	// Handle closing commit history - go back to tree/blob view
 	const handleCloseHistory = React.useCallback(() => {
+		if (!currentBranch) return;
 		setHistoryPage(1);
 		if (currentPath) {
 			// Check if the current path is a file or directory
@@ -454,6 +478,7 @@ function RouteComponent() {
 	// Handle file selection from explorer
 	const handleFileSelect = React.useCallback(
 		(node: TreeNode) => {
+			if (!currentBranch) return;
 			if (node.type === "blob") {
 				navigateTo("blob", currentBranch, node.path);
 			} else {
@@ -466,6 +491,7 @@ function RouteComponent() {
 	// Handle file selection from directory view
 	const handleFileSelectFromDir = React.useCallback(
 		(path: string) => {
+			if (!currentBranch) return;
 			if (treeData) {
 				const node = findNode(treeData, path);
 				if (node?.type === "blob") {
@@ -481,6 +507,7 @@ function RouteComponent() {
 	// Handle breadcrumb/directory navigation
 	const handleNavigate = React.useCallback(
 		(path: string) => {
+			if (!currentBranch) return;
 			navigateTo("tree", currentBranch, path);
 		},
 		[navigateTo, currentBranch],
