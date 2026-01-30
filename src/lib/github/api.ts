@@ -14,9 +14,11 @@ import type {
 } from "@/lib/types/github";
 import {
 	createGitHubClient,
+	extractRateLimitHeaders,
 	GITHUB_API_HEADERS,
 	MAX_FILE_SIZE_NORMAL,
 	MAX_FILE_SIZE_RAW,
+	notifyRateLimitHeaders,
 	SIMULATE_RATE_LIMIT,
 } from "./client";
 
@@ -40,6 +42,10 @@ export async function getBranches(
 				signal: AbortSignal.timeout(5000),
 			},
 		});
+
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(result.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
 
 		return result.data.map((branch) => ({
 			name: branch.name,
@@ -122,6 +128,10 @@ export async function getRepoInfo(
 				signal: AbortSignal.timeout(5000),
 			},
 		});
+
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(result.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
 
 		return {
 			owner: result.data.owner.login,
@@ -232,6 +242,10 @@ export async function getContributors(
 				headers: GITHUB_API_HEADERS,
 			},
 		);
+
+		// Extract and notify rate limit headers (from the second request)
+		const rateLimitHeaders = extractRateLimitHeaders(result.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
 
 		const contributors = result.data.map((contributor) => ({
 			login: contributor.login ?? "unknown",
@@ -351,6 +365,10 @@ export async function getDirectoryTree(
 			},
 		);
 
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(result.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
+
 		// Convert to TreeNode format
 		return (result.data.tree as TreeItem[]).map((item) => ({
 			path: path ? `${path}/${item.path}` : item.path,
@@ -468,6 +486,10 @@ export async function getRepoTree(
 				},
 			},
 		);
+
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(result.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
 
 		if (result.data.truncated) {
 			console.warn(
@@ -621,6 +643,10 @@ export async function getDirectoryContentDirect(
 			},
 		);
 
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(result.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
+
 		const contents = Array.isArray(result.data) ? result.data : [result.data];
 
 		// Convert to DirectoryEntry format
@@ -740,6 +766,10 @@ export async function getFileContent(
 			},
 		);
 
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(contentResult.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
+
 		let fileContent: FileContent;
 
 		if (isLargeFile) {
@@ -848,6 +878,10 @@ export async function getCommitHistory(
 			},
 		);
 
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(commitsResult.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
+
 		const commits: CommitHistoryEntry[] = commitsResult.data.map((commit) => ({
 			sha: commit.sha,
 			message: commit.commit?.message || "",
@@ -895,6 +929,10 @@ export async function getTotalCommitCount(
 			},
 		);
 
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(response.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
+
 		const linkHeader = response.headers.link;
 		if (linkHeader) {
 			const lastMatch = linkHeader.match(/page=(\d+)>; rel="last"/);
@@ -918,6 +956,10 @@ export async function getUser(username: string): Promise<GitHubUser> {
 			username,
 		});
 
+		// Extract and notify rate limit headers (unauthenticated)
+		const rateLimitHeaders = extractRateLimitHeaders(response.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, undefined);
+
 		return response.data;
 	} catch (error) {
 		console.error("Failed to fetch commit count:", error);
@@ -929,6 +971,10 @@ export async function getAuthenticatedUser(token: string): Promise<GitHubUser> {
 
 	try {
 		const response = await octokit.request("GET /user");
+
+		// Extract and notify rate limit headers
+		const rateLimitHeaders = extractRateLimitHeaders(response.headers);
+		notifyRateLimitHeaders(rateLimitHeaders, token);
 
 		return response.data;
 	} catch (error) {

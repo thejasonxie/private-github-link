@@ -57,3 +57,60 @@ export async function withTimeout<T>(
  */
 export const MAX_FILE_SIZE_NORMAL = 1024 * 1024; // 1MB
 export const MAX_FILE_SIZE_RAW = 100 * 1024 * 1024; // 100MB
+
+// Global rate limit callback - set by the rate limit hook
+let rateLimitCallback:
+	| ((
+			headers: Record<string, string | number | undefined>,
+			token?: string,
+	  ) => void)
+	| null = null;
+
+/**
+ * Register a callback to be called when rate limit headers are received
+ * This is used internally by the rate limit tracking system
+ */
+export function registerRateLimitCallback(
+	callback: (
+		headers: Record<string, string | number | undefined>,
+		token?: string,
+	) => void,
+): void {
+	rateLimitCallback = callback;
+}
+
+/**
+ * Unregister the rate limit callback
+ */
+export function unregisterRateLimitCallback(): void {
+	rateLimitCallback = null;
+}
+
+/**
+ * Notify the rate limit system about new headers
+ * Called automatically by API functions after each request
+ */
+export function notifyRateLimitHeaders(
+	headers: Record<string, string | number | undefined>,
+	token?: string,
+): void {
+	if (rateLimitCallback) {
+		rateLimitCallback(headers, token);
+	}
+}
+
+/**
+ * Helper to extract rate limit headers from an Octokit response
+ */
+export function extractRateLimitHeaders(
+	headers: Record<string, unknown>,
+): Record<string, string | number | undefined> {
+	return {
+		"x-ratelimit-limit": headers["x-ratelimit-limit"] as number | undefined,
+		"x-ratelimit-remaining": headers["x-ratelimit-remaining"] as
+			| number
+			| undefined,
+		"x-ratelimit-reset": headers["x-ratelimit-reset"] as number | undefined,
+		"x-ratelimit-used": headers["x-ratelimit-used"] as number | undefined,
+	};
+}

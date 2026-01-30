@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/popover";
 import { CLIPBOARD_FEEDBACK_DURATION } from "@/lib/constants";
 import { getUser } from "@/lib/github/api";
+import { useRateLimit } from "@/lib/github/rate-limit";
 import type { Contributor, RepoInfo } from "@/lib/types/github";
 import { cn } from "@/lib/utils";
 import { ModeToggle } from "../mode-toggle";
@@ -49,6 +50,36 @@ function formatCount(count: number | undefined): string {
 		return `${(count / 1000).toFixed(1)}k`;
 	}
 	return count.toString();
+}
+
+/**
+ * Rate limit badge component showing API usage
+ */
+function RateLimitBadge({ token }: { token?: string }) {
+	const { state } = useRateLimit(token);
+
+	if (!state) {
+		return null;
+	}
+
+	const { used, limit, percentage } = state;
+
+	// Determine color based on usage percentage
+	let colorClass = "text-muted-foreground";
+	if (percentage >= 81) {
+		colorClass = "text-orange-500";
+	} else if (percentage >= 61) {
+		colorClass = "text-yellow-500";
+	}
+
+	return (
+		<div
+			className={`text-xs font-mono ${colorClass} hidden sm:block`}
+			title={`${used.toLocaleString()} / ${limit.toLocaleString()} API requests used (${percentage}%)`}
+		>
+			{used.toLocaleString()}/{limit.toLocaleString()}
+		</div>
+	);
 }
 
 export function RepoHeader({
@@ -140,6 +171,9 @@ export function RepoHeader({
 
 				{/* Actions */}
 				<div className="flex items-center gap-2 shrink-0">
+					{/* Rate limit badge */}
+					<RateLimitBadge token={accessToken} />
+
 					{/* Clone/Download popover */}
 					<ClientOnly fallback={<div className="w-10 h-10" />}>
 						<ModeToggle />

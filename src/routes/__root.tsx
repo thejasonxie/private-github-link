@@ -11,6 +11,7 @@ import { PostHogProvider } from "posthog-js/react";
 import { ErrorFallback } from "@/components/error-fallback";
 import { SentryTestButton } from "@/components/sentry-test-button";
 import { ThemeProvider } from "@/components/theme-provider";
+import { RateLimitProvider } from "@/lib/github/rate-limit";
 import { getPostHogApiKey, posthogOptions } from "@/lib/posthog.client";
 
 import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
@@ -57,7 +58,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 	const content = (
 		<ThemeProvider>
 			<Sentry.ErrorBoundary fallback={<ErrorFallback />}>
-				{children}
+				<RateLimitProvider>{children}</RateLimitProvider>
 			</Sentry.ErrorBoundary>
 		</ThemeProvider>
 	);

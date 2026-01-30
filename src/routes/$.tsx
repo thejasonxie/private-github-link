@@ -34,6 +34,7 @@ import {
 } from "@/lib/github";
 import { getAuthenticatedUser, RateLimitError } from "@/lib/github/api";
 import { withTimeout } from "@/lib/github/client";
+import { useRateLimit } from "@/lib/github/rate-limit";
 import { findNode } from "@/lib/tree-utils";
 import type { TreeNode } from "@/lib/types/github";
 
@@ -57,6 +58,10 @@ function RouteComponent() {
 	const owner = parsed?.owner || "";
 	const repo = parsed?.repo || "";
 	const githubToken = search?.access_token || "";
+
+	// Initialize rate limit tracking - this will poll every 60 seconds
+	// and update when API calls are made
+	useRateLimit(githubToken || undefined);
 
 	// Get repo info from loader (only populated when authenticated)
 	const loaderRepoInfo = loaderData.repoInfo;
@@ -178,6 +183,20 @@ function RouteComponent() {
 		new Map(),
 	);
 
+	// Use refs to ensure mutation always has access to latest values
+	const ownerRef = React.useRef(owner);
+	const repoRef = React.useRef(repo);
+	const currentBranchRef = React.useRef(currentBranch);
+	const githubTokenRef = React.useRef(githubToken);
+
+	// Update refs when values change
+	React.useEffect(() => {
+		ownerRef.current = owner;
+		repoRef.current = repo;
+		currentBranchRef.current = currentBranch;
+		githubTokenRef.current = githubToken;
+	}, [owner, repo, currentBranch, githubToken]);
+
 	// Update treeData when rootTreeData changes
 	React.useEffect(() => {
 		if (rootTreeData) {
@@ -196,12 +215,13 @@ function RouteComponent() {
 				return next;
 			});
 			try {
+				// Use refs to always get latest values
 				const result = await getDirectoryTree(
-					owner,
-					repo,
-					currentBranch,
+					ownerRef.current,
+					repoRef.current,
+					currentBranchRef.current,
 					path,
-					githubToken,
+					githubTokenRef.current,
 				);
 				return result;
 			} catch (error) {
@@ -267,31 +287,37 @@ function RouteComponent() {
 	// Preload handler for file viewer (preload directory content on hover)
 	const handleDirectoryHover = React.useCallback(
 		(path: string, type: "tree" | "blob") => {
+			// Use refs to always get latest values
+			const currentOwner = ownerRef.current;
+			const currentRepo = repoRef.current;
+			const branch = currentBranchRef.current;
+			const token = githubTokenRef.current;
+
 			// Only preload directories
-			if (type === "tree" && owner && repo && currentBranch) {
+			if (type === "tree" && currentOwner && currentRepo && branch) {
 				// Prefetch the directory content
 				queryClient.prefetchQuery({
 					queryKey: [
 						"getDirectoryContentDirect",
-						owner,
-						repo,
+						currentOwner,
+						currentRepo,
 						path,
-						currentBranch,
-						githubToken,
+						branch,
+						token,
 					],
 					queryFn: () =>
 						getDirectoryContentDirect(
-							owner,
-							repo,
+							currentOwner,
+							currentRepo,
 							path,
-							currentBranch,
-							githubToken,
+							branch,
+							token,
 						),
 					staleTime: CACHE_FIVE_MINUTES,
 				});
 			}
 		},
-		[queryClient, owner, repo, currentBranch, githubToken],
+		[queryClient],
 	);
 
 	// Find the selected file node from tree if viewing a file
@@ -301,7 +327,11 @@ function RouteComponent() {
 	}, [isFileView, treeData, currentPath]);
 
 	// Fetch directory content when viewing a directory (using direct API, no treeData needed)
-	const { data: directoryData, isLoading: isDirectoryLoading } = useQuery({
+	const {
+		data: directoryData,
+		isLoading: isDirectoryLoading,
+		error: directoryError,
+	} = useQuery({
 		queryKey: [
 			"getDirectoryContentDirect",
 			owner,
@@ -482,7 +512,9 @@ function RouteComponent() {
 
 	const clientRateLimitError =
 		isRateLimitErr(repoInfoError as Error | null) ||
-		isRateLimitErr(branchesError as Error | null);
+		isRateLimitErr(branchesError as Error | null) ||
+		isRateLimitErr(fileError as Error | null) ||
+		isRateLimitErr(directoryError as Error | null);
 
 	if (clientRateLimitError) {
 		return (
@@ -500,7 +532,7 @@ function RouteComponent() {
 					<FileViewer
 						file={null}
 						directory={null}
-						isLoading={false}
+						isLoading={true}
 						repoName={repo}
 						currentPath={currentPath}
 						className="flex-1 min-w-0"
@@ -543,7 +575,7 @@ function RouteComponent() {
 					<FileViewer
 						file={null}
 						directory={null}
-						isLoading={false}
+						isLoading={true}
 						repoName={repo}
 						currentPath={currentPath}
 						className="flex-1 min-w-0"
@@ -594,7 +626,7 @@ function RouteComponent() {
 					<FileViewer
 						file={null}
 						directory={null}
-						isLoading={false}
+						isLoading={true}
 						repoName={repo}
 						currentPath={currentPath}
 						className="flex-1 min-w-0"
