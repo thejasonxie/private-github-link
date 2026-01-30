@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	type ErrorComponentProps,
@@ -26,10 +26,10 @@ import {
 	getBranches,
 	getCommitHistory,
 	getContributors,
-	getDirectoryContent,
+	getDirectoryContentDirect,
+	getDirectoryTree,
 	getFileContent,
 	getRepoInfo,
-	getRepoTree,
 	getTotalCommitCount,
 } from "@/lib/github";
 import { getAuthenticatedUser, RateLimitError } from "@/lib/github/api";
@@ -48,6 +48,7 @@ function RouteComponent() {
 	const navigate = useNavigate();
 	const search = Route.useSearch() as { access_token?: string };
 	const loaderData = Route.useLoaderData();
+	const queryClient = useQueryClient();
 
 	// Parse URL
 	const splatPath = params["_splat"] || "";
@@ -148,18 +149,150 @@ function RouteComponent() {
 		[navigate, owner, repo, search?.access_token],
 	);
 
-	// Fetch tree for current branch
+	// Fetch root-level tree only (lazy loading for subdirectories)
 	const {
-		data: treeData,
+		data: rootTreeData,
 		isLoading: isTreeLoading,
 		error: treeError,
 	} = useQuery({
-		queryKey: ["getRepoTree", owner, repo, currentBranch, githubToken],
-		queryFn: () => getRepoTree(owner, repo, currentBranch, githubToken),
+		queryKey: ["getDirectoryTree", owner, repo, currentBranch, "", githubToken],
+		queryFn: () =>
+			getDirectoryTree(owner, repo, currentBranch, "", githubToken),
 		enabled: Boolean(owner && repo && currentBranch && repoInfo),
 		staleTime: CACHE_FIVE_MINUTES,
 		retry: false,
 	});
+
+	// Store complete tree data with loaded children
+	const [treeData, setTreeData] = React.useState<TreeNode[] | undefined>(
+		undefined,
+	);
+
+	// Track which paths are currently loading
+	const [loadingPaths, setLoadingPaths] = React.useState<Set<string>>(
+		new Set(),
+	);
+
+	// Track which paths have errors
+	const [errorPaths, setErrorPaths] = React.useState<Map<string, string>>(
+		new Map(),
+	);
+
+	// Update treeData when rootTreeData changes
+	React.useEffect(() => {
+		if (rootTreeData) {
+			setTreeData(rootTreeData);
+		}
+	}, [rootTreeData]);
+
+	// Mutation to load children for a specific directory
+	const loadChildrenMutation = useMutation({
+		mutationFn: async (path: string) => {
+			setLoadingPaths((prev) => new Set(prev).add(path));
+			// Clear any previous error for this path
+			setErrorPaths((prev) => {
+				const next = new Map(prev);
+				next.delete(path);
+				return next;
+			});
+			try {
+				const result = await getDirectoryTree(
+					owner,
+					repo,
+					currentBranch,
+					path,
+					githubToken,
+				);
+				return result;
+			} catch (error) {
+				const errorMessage =
+					error instanceof Error ? error.message : "Failed to load folder";
+				setErrorPaths((prev) => new Map(prev).set(path, errorMessage));
+				throw error;
+			} finally {
+				setLoadingPaths((prev) => {
+					const next = new Set(prev);
+					next.delete(path);
+					return next;
+				});
+			}
+		},
+		onSuccess: (children, path) => {
+			setTreeData((prevTree) => {
+				if (!prevTree) return prevTree;
+
+				// Helper to update a node in the tree with new children
+				const updateNodeChildren = (nodes: TreeNode[]): TreeNode[] => {
+					return nodes.map((node) => {
+						if (node.path === path) {
+							return { ...node, children };
+						}
+						if (node.children) {
+							return { ...node, children: updateNodeChildren(node.children) };
+						}
+						return node;
+					});
+				};
+
+				return updateNodeChildren(prevTree);
+			});
+		},
+	});
+
+	// Handler to load children when expanding a folder
+	const handleLoadChildren = React.useCallback(
+		async (path: string) => {
+			if (loadingPaths.has(path)) return;
+			await loadChildrenMutation.mutateAsync(path);
+		},
+		[loadChildrenMutation, loadingPaths],
+	);
+
+	// Handler to preload children on hover (like preload="intent" in TanStack Router)
+	const handleHover = React.useCallback(
+		(node: TreeNode) => {
+			// Only preload folders that don't have children loaded yet and aren't already loading
+			if (
+				node.type === "tree" &&
+				(!node.children || node.children.length === 0) &&
+				!loadingPaths.has(node.path)
+			) {
+				// Preload the children
+				loadChildrenMutation.mutate(node.path);
+			}
+		},
+		[loadChildrenMutation, loadingPaths],
+	);
+
+	// Preload handler for file viewer (preload directory content on hover)
+	const handleDirectoryHover = React.useCallback(
+		(path: string, type: "tree" | "blob") => {
+			// Only preload directories
+			if (type === "tree" && owner && repo && currentBranch) {
+				// Prefetch the directory content
+				queryClient.prefetchQuery({
+					queryKey: [
+						"getDirectoryContentDirect",
+						owner,
+						repo,
+						path,
+						currentBranch,
+						githubToken,
+					],
+					queryFn: () =>
+						getDirectoryContentDirect(
+							owner,
+							repo,
+							path,
+							currentBranch,
+							githubToken,
+						),
+					staleTime: CACHE_FIVE_MINUTES,
+				});
+			}
+		},
+		[queryClient, owner, repo, currentBranch, githubToken],
+	);
 
 	// Find the selected file node from tree if viewing a file
 	const selectedFile = React.useMemo(() => {
@@ -167,10 +300,10 @@ function RouteComponent() {
 		return findNode(treeData, currentPath);
 	}, [isFileView, treeData, currentPath]);
 
-	// Fetch directory content when viewing a directory
+	// Fetch directory content when viewing a directory (using direct API, no treeData needed)
 	const { data: directoryData, isLoading: isDirectoryLoading } = useQuery({
 		queryKey: [
-			"getDirectoryContent",
+			"getDirectoryContentDirect",
 			owner,
 			repo,
 			currentPath,
@@ -178,16 +311,15 @@ function RouteComponent() {
 			githubToken,
 		],
 		queryFn: () =>
-			getDirectoryContent(
+			getDirectoryContentDirect(
 				owner,
 				repo,
 				currentPath,
 				currentBranch,
-				treeData!,
 				githubToken,
 			),
 		enabled: Boolean(
-			treeData && !isFileView && !isCommitsView && owner && repo,
+			!isFileView && !isCommitsView && owner && repo && repoInfo,
 		),
 	});
 
@@ -525,6 +657,10 @@ function RouteComponent() {
 									onBranchChange={handleBranchChange}
 									onFileSelect={handleMobileFileSelect}
 									onShowBranchesChange={setShowBranches}
+									onLoadChildren={handleLoadChildren}
+									onHover={handleHover}
+									loadingPaths={loadingPaths}
+									errorPaths={errorPaths}
 									className="h-full"
 								/>
 							</div>
@@ -537,6 +673,8 @@ function RouteComponent() {
 					<FileExplorer
 						tree={treeData ?? []}
 						isTreeLoading={isTreeLoading}
+						loadingPaths={loadingPaths}
+						errorPaths={errorPaths}
 						title="Files"
 						branch={currentBranch}
 						branches={branchNames}
@@ -544,6 +682,8 @@ function RouteComponent() {
 						onBranchChange={handleBranchChange}
 						onFileSelect={handleFileSelect}
 						onShowBranchesChange={setShowBranches}
+						onLoadChildren={handleLoadChildren}
+						onHover={handleHover}
 						className="w-80 h-full"
 					/>
 				</div>
@@ -565,6 +705,7 @@ function RouteComponent() {
 					error={fileError?.message ?? null}
 					onNavigate={handleNavigate}
 					onFileSelect={handleFileSelectFromDir}
+					onHover={handleDirectoryHover}
 					onShowHistory={handleShowHistory}
 					onCloseHistory={handleCloseHistory}
 					onPrevPage={handlePrevPage}

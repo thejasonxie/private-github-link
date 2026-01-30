@@ -19,6 +19,8 @@ import { sortTreeNodes, TreeItem } from "./tree-item";
 interface FileExplorerProps {
 	tree: TreeNode[];
 	isTreeLoading?: boolean;
+	loadingPaths?: Set<string>;
+	errorPaths?: Map<string, string>;
 	title?: string;
 	branch?: string;
 	branches?: string[];
@@ -26,12 +28,16 @@ interface FileExplorerProps {
 	onBranchChange?: (branch: string) => void;
 	onFileSelect?: (node: TreeNode) => void;
 	onShowBranchesChange?: (show: boolean) => void;
+	onLoadChildren?: (path: string) => Promise<void>;
+	onHover?: (node: TreeNode) => void;
 	className?: string;
 }
 
 export function FileExplorer({
 	tree,
 	isTreeLoading,
+	loadingPaths,
+	errorPaths,
 	title = "Files",
 	branch = "main",
 	branches = ["main"],
@@ -39,11 +45,16 @@ export function FileExplorer({
 	onBranchChange,
 	onFileSelect,
 	onShowBranchesChange,
+	onLoadChildren,
+	onHover,
 	className,
 }: FileExplorerProps) {
 	const [searchQuery, setSearchQuery] = React.useState("");
 	const [selectedPath, setSelectedPath] = React.useState<string>();
 	const [showBranchesInternal, setShowBranchesInternal] = React.useState(false);
+	const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(
+		new Set(),
+	);
 
 	// Use controlled state if provided, otherwise use internal state
 	const showBranches = showBranchesProp ?? showBranchesInternal;
@@ -58,6 +69,27 @@ export function FileExplorer({
 		onBranchChange?.(selectedBranch);
 		setShowBranches(false);
 		setSelectedPath(undefined); // Reset selection to go to root
+		setExpandedPaths(new Set()); // Reset expanded folders
+	};
+
+	const handleToggleExpand = async (node: TreeNode) => {
+		const newExpanded = new Set(expandedPaths);
+		const isExpanded = newExpanded.has(node.path);
+
+		if (isExpanded) {
+			newExpanded.delete(node.path);
+		} else {
+			newExpanded.add(node.path);
+			// Load children if not already loaded
+			if (
+				onLoadChildren &&
+				node.type === "tree" &&
+				(!node.children || node.children.length === 0)
+			) {
+				await onLoadChildren(node.path);
+			}
+		}
+		setExpandedPaths(newExpanded);
 	};
 
 	const sortedTree = React.useMemo(() => sortTreeNodes(tree), [tree]);
@@ -172,6 +204,12 @@ export function FileExplorer({
 								onFileSelect={handleFileSelect}
 								selectedPath={selectedPath}
 								searchQuery={searchQuery}
+								isExpanded={expandedPaths.has(node.path)}
+								onToggleExpand={handleToggleExpand}
+								onLoadChildren={onLoadChildren}
+								onHover={onHover}
+								loadingPaths={loadingPaths}
+								errorPaths={errorPaths}
 							/>
 						))}
 					</div>

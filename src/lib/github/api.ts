@@ -288,6 +288,86 @@ function checkRateLimitError(error: unknown): void {
 }
 
 /**
+ * Fetch a single directory's contents (non-recursive)
+ * Used for lazy loading tree nodes
+ */
+export async function getDirectoryTree(
+	owner: string,
+	repo: string,
+	branch: string,
+	path: string,
+	token: string,
+): Promise<TreeNode[]> {
+	const octokit = createGitHubClient(token);
+
+	try {
+		// First, get the tree SHA for the directory
+		let treeSha = branch;
+
+		if (path) {
+			// Get the tree for the parent path to find the SHA of our target directory
+			const parentPath = path.split("/").slice(0, -1).join("/");
+			const targetName = path.split("/").pop() || "";
+
+			const parentResult = await octokit.request(
+				"GET /repos/{owner}/{repo}/git/trees/{tree_sha}",
+				{
+					owner,
+					repo,
+					tree_sha: branch,
+					recursive: parentPath ? "1" : undefined,
+					headers: GITHUB_API_HEADERS,
+					request: {
+						signal: AbortSignal.timeout(5000),
+					},
+				},
+			);
+
+			const treeData = parentResult.data.tree as TreeItem[];
+			const targetItem = treeData.find(
+				(item) =>
+					item.type === "tree" &&
+					(parentPath ? item.path === path : item.path === targetName),
+			);
+
+			if (!targetItem) {
+				throw new Error(`Directory not found: ${path}`);
+			}
+
+			treeSha = targetItem.sha;
+		}
+
+		// Now fetch the directory contents
+		const result = await octokit.request(
+			"GET /repos/{owner}/{repo}/git/trees/{tree_sha}",
+			{
+				owner,
+				repo,
+				tree_sha: treeSha,
+				headers: GITHUB_API_HEADERS,
+				request: {
+					signal: AbortSignal.timeout(5000),
+				},
+			},
+		);
+
+		// Convert to TreeNode format
+		return (result.data.tree as TreeItem[]).map((item) => ({
+			path: path ? `${path}/${item.path}` : item.path,
+			name: item.path,
+			type: item.type,
+			sha: item.sha,
+			size: item.size,
+			children: item.type === "tree" ? [] : undefined,
+		}));
+	} catch (error) {
+		console.error("Failed to fetch directory tree:", error);
+		checkRateLimitError(error);
+		throw error;
+	}
+}
+
+/**
  * Fetch repository tree from GitHub API
  */
 export async function getRepoTree(
@@ -510,6 +590,116 @@ export async function getDirectoryContent(
 		entries: entriesWithCommits,
 		commit: directoryCommit,
 	};
+}
+
+/**
+ * Fetch directory content directly from GitHub API (no treeData required)
+ * Used for lazy loading - fetches directory contents on demand
+ */
+export async function getDirectoryContentDirect(
+	owner: string,
+	repo: string,
+	path: string,
+	branch: string,
+	token: string,
+): Promise<DirectoryContent> {
+	const octokit = createGitHubClient(token);
+
+	try {
+		// Fetch directory contents directly from GitHub API
+		const result = await octokit.request(
+			"GET /repos/{owner}/{repo}/contents/{path}",
+			{
+				owner,
+				repo,
+				path: path || ".",
+				ref: branch,
+				headers: GITHUB_API_HEADERS,
+				request: {
+					signal: AbortSignal.timeout(5000),
+				},
+			},
+		);
+
+		const contents = Array.isArray(result.data) ? result.data : [result.data];
+
+		// Convert to DirectoryEntry format
+		const entries: DirectoryEntry[] = contents.map((item) => ({
+			name: item.name,
+			path: item.path,
+			type: item.type === "dir" ? "tree" : "blob",
+			sha: item.sha,
+			size: item.size,
+		}));
+
+		// Fetch commit info for the directory
+		let directoryCommit: CommitInfo | undefined;
+		try {
+			const commitsResult = await octokit.request(
+				"GET /repos/{owner}/{repo}/commits",
+				{
+					owner,
+					repo,
+					path: path || undefined,
+					sha: branch,
+					per_page: 1,
+					headers: GITHUB_API_HEADERS,
+				},
+			);
+
+			const latestCommit = commitsResult.data[0];
+			if (latestCommit) {
+				directoryCommit = {
+					sha: latestCommit.sha,
+					message: latestCommit.commit?.message || "",
+					author: latestCommit.commit?.author?.name || "Unknown",
+					date: latestCommit.commit?.author?.date || new Date().toISOString(),
+					avatarUrl: latestCommit.author?.avatar_url,
+					authorUrl: latestCommit.author?.html_url,
+				};
+			}
+		} catch (error) {
+			console.error("Failed to fetch directory commit:", error);
+		}
+
+		// Fetch commit info for each entry
+		const entriesWithCommits: DirectoryEntry[] = await Promise.all(
+			entries.map(async (entry): Promise<DirectoryEntry> => {
+				try {
+					const commitsResult = await octokit.request(
+						"GET /repos/{owner}/{repo}/commits",
+						{
+							owner,
+							repo,
+							path: entry.path,
+							sha: branch,
+							per_page: 1,
+							headers: GITHUB_API_HEADERS,
+						},
+					);
+
+					const latestCommit = commitsResult.data[0];
+					return {
+						...entry,
+						commitMessage: latestCommit?.commit?.message?.split("\n")[0] || "",
+						commitDate: latestCommit?.commit?.author?.date,
+					};
+				} catch {
+					return entry;
+				}
+			}),
+		);
+
+		return {
+			path,
+			entries: entriesWithCommits,
+			commit: directoryCommit,
+		};
+	} catch (error) {
+		console.error("Failed to fetch directory content:", error);
+		checkRateLimitError(error);
+		throw error;
+	}
 }
 
 /**

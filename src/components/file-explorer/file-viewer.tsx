@@ -3,7 +3,7 @@ import {
 	Copy,
 	Download,
 	History,
-	Link,
+	LinkIcon,
 	MoreHorizontal,
 	PanelLeft,
 	WrapText,
@@ -62,6 +62,7 @@ interface FileViewerProps {
 	error?: string | null;
 	onNavigate?: (path: string) => void;
 	onFileSelect?: (path: string) => void;
+	onHover?: (path: string, type: "tree" | "blob") => void;
 	onShowHistory?: () => void;
 	onCloseHistory?: () => void;
 	onPrevPage?: () => void;
@@ -129,6 +130,7 @@ export function FileViewer({
 	error,
 	onNavigate,
 	onFileSelect,
+	onHover,
 	onShowHistory,
 	onCloseHistory,
 	onPrevPage,
@@ -241,7 +243,7 @@ export function FileViewer({
 									navigator.clipboard.writeText(permalink);
 								}}
 							>
-								<Link className="size-4" />
+								<LinkIcon className="size-4" />
 								<span>Copy permalink</span>
 							</DropdownMenuItem>
 							{file && (
@@ -321,7 +323,7 @@ export function FileViewer({
 								<History className="size-3.5" />
 								<span>
 									{isRoot && totalCommits !== undefined
-										? `${totalCommits} commits`
+										? `${totalCommits.toLocaleString()} commits`
 										: "History"}
 								</span>
 							</Button>
@@ -466,6 +468,7 @@ export function FileViewer({
 					directory={directory}
 					onNavigate={onNavigate}
 					onFileSelect={onFileSelect}
+					onHover={onHover}
 				/>
 			) : file ? (
 				<FileContentRenderer

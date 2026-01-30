@@ -7,12 +7,14 @@ interface DirectoryViewerProps {
 	directory: DirectoryContent;
 	onNavigate?: (path: string) => void;
 	onFileSelect?: (path: string) => void;
+	onHover?: (path: string, type: "tree" | "blob") => void;
 }
 
 export function DirectoryViewer({
 	directory,
 	onNavigate,
 	onFileSelect,
+	onHover,
 }: DirectoryViewerProps) {
 	// Sort entries: folders first, then files, alphabetically within each group
 	const sortedEntries = React.useMemo(() => {
@@ -38,6 +40,17 @@ export function DirectoryViewer({
 		}
 	};
 
+	const handleEntryHover = (entry: DirectoryEntry) => {
+		onHover?.(entry.path, entry.type);
+	};
+
+	const handleParentHover = () => {
+		if (directory.path) {
+			const parentPath = directory.path.split("/").slice(0, -1).join("/");
+			onHover?.(parentPath, "tree");
+		}
+	};
+
 	return (
 		<div className="w-full overflow-hidden">
 			<table className="w-full table-fixed">
@@ -56,6 +69,7 @@ export function DirectoryViewer({
 						<tr
 							className="border-b hover:bg-accent/30 cursor-pointer"
 							onClick={handleParentClick}
+							onMouseEnter={handleParentHover}
 						>
 							<td className="px-4 py-2">
 								<div className="flex items-center gap-2">
@@ -75,6 +89,7 @@ export function DirectoryViewer({
 							key={entry.path}
 							className="border-b hover:bg-accent/30 cursor-pointer"
 							onClick={() => handleEntryClick(entry)}
+							onMouseEnter={() => handleEntryHover(entry)}
 						>
 							<td className="px-4 py-2">
 								<div className="flex items-center gap-2 min-w-0">

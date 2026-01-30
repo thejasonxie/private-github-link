@@ -4,6 +4,8 @@ export {
 	getCommitHistory,
 	getContributors,
 	getDirectoryContent,
+	getDirectoryContentDirect,
+	getDirectoryTree,
 	getFileContent,
 	getRepoInfo,
 	getRepoTree,

@@ -9,6 +9,12 @@ interface TreeItemProps {
 	onFileSelect?: (node: TreeNode) => void;
 	selectedPath?: string;
 	searchQuery?: string;
+	isExpanded?: boolean;
+	onToggleExpand?: (node: TreeNode) => void;
+	onLoadChildren?: (path: string) => Promise<void>;
+	onHover?: (node: TreeNode) => void;
+	loadingPaths?: Set<string>;
+	errorPaths?: Map<string, string>;
 }
 
 /**
@@ -43,40 +49,89 @@ export function TreeItem({
 	onFileSelect,
 	selectedPath,
 	searchQuery,
+	isExpanded,
+	onToggleExpand,
+	onLoadChildren,
+	onHover,
+	loadingPaths,
+	errorPaths,
 }: TreeItemProps) {
-	const [isOpen, setIsOpen] = React.useState(false);
+	// Use controlled state if provided, otherwise use internal state
+	const [internalOpen, setInternalOpen] = React.useState(false);
+	const isOpen = isExpanded ?? internalOpen;
 	const isFolder = node.type === "tree";
 	const isSelected = selectedPath === node.path;
+	const isLoading = loadingPaths?.has(node.path) ?? false;
+	const errorMessage = errorPaths?.get(node.path);
 
 	// Auto-expand if search matches a child
 	React.useEffect(() => {
 		if (searchQuery && isFolder && node.children) {
 			const hasMatchingChild = hasMatchingDescendant(node, searchQuery);
-			if (hasMatchingChild) {
-				setIsOpen(true);
+			if (hasMatchingChild && !isOpen) {
+				if (onToggleExpand) {
+					onToggleExpand(node);
+				} else {
+					setInternalOpen(true);
+					// Load children if needed for nested items
+					if (
+						onLoadChildren &&
+						(!node.children || node.children.length === 0)
+					) {
+						onLoadChildren(node.path);
+					}
+				}
 			}
 		}
-	}, [searchQuery, isFolder, node]);
+	}, [searchQuery, isFolder, node, isOpen, onToggleExpand, onLoadChildren]);
 
-	const handleClick = () => {
+	const handleClick = async () => {
 		if (isFolder) {
-			setIsOpen(!isOpen);
+			if (onToggleExpand) {
+				onToggleExpand(node);
+			} else {
+				// Using internal state - need to handle loading children ourselves
+				const willOpen = !internalOpen;
+				setInternalOpen(willOpen);
+				if (
+					willOpen &&
+					onLoadChildren &&
+					(!node.children || node.children.length === 0)
+				) {
+					await onLoadChildren(node.path);
+				}
+			}
 		} else {
 			onFileSelect?.(node);
 		}
 	};
 
-	const handleKeyDown = (e: React.KeyboardEvent) => {
+	const handleKeyDown = async (e: React.KeyboardEvent) => {
 		if (e.key === "Enter" || e.key === " ") {
 			e.preventDefault();
-			handleClick();
+			await handleClick();
 		}
 		if (e.key === "ArrowRight" && isFolder && !isOpen) {
-			setIsOpen(true);
+			if (onToggleExpand) {
+				onToggleExpand(node);
+			} else {
+				setInternalOpen(true);
+				if (onLoadChildren && (!node.children || node.children.length === 0)) {
+					await onLoadChildren(node.path);
+				}
+			}
 		}
 		if (e.key === "ArrowLeft" && isFolder && isOpen) {
-			setIsOpen(false);
+			if (onToggleExpand) {
+				onToggleExpand(node);
+			} else {
+				setInternalOpen(false);
+			}
 		}
+	};
+
+	const handleMouseEnter = () => {
+		onHover?.(node);
 	};
 
 	// Filter out non-matching items when searching
@@ -98,6 +153,7 @@ export function TreeItem({
 				tabIndex={0}
 				onClick={handleClick}
 				onKeyDown={handleKeyDown}
+				onMouseEnter={handleMouseEnter}
 				className={cn(
 					"group flex items-center gap-1 py-1 px-2 cursor-pointer rounded-md text-sm",
 					"hover:bg-accent/50 focus:bg-accent/50 focus:outline-none",
@@ -105,7 +161,7 @@ export function TreeItem({
 				)}
 				style={{ paddingLeft: `${depth * 16 + 8}px` }}
 			>
-				{isFolder ? (
+				{isFolder && (node.children || isLoading) ? (
 					<ChevronRight
 						className={cn(
 							"size-4 shrink-0 text-muted-foreground transition-transform duration-200",
@@ -116,27 +172,53 @@ export function TreeItem({
 					<span className="w-4" />
 				)}
 				{isFolder ? (
-					<Folder
-						className="size-4 shrink-0 text-blue-400"
-						fill="currentColor"
-					/>
+					isLoading ? (
+						<span className="size-4 shrink-0 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+					) : (
+						<Folder
+							className="size-4 shrink-0 text-blue-400"
+							fill="currentColor"
+						/>
+					)
 				) : (
 					<File className="size-4 shrink-0 text-muted-foreground" />
 				)}
 				<span className="truncate">{node.name}</span>
 			</div>
-			{isFolder && isOpen && node.children && (
+			{isFolder && isOpen && (
 				<div>
-					{sortTreeNodes(node.children).map((child) => (
-						<TreeItem
-							key={child.path}
-							node={child}
-							depth={depth + 1}
-							onFileSelect={onFileSelect}
-							selectedPath={selectedPath}
-							searchQuery={searchQuery}
-						/>
-					))}
+					{isLoading ? (
+						<div
+							className="py-2 px-2 text-sm text-muted-foreground"
+							style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
+						>
+							<span className="inline-block size-3 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin mr-2" />
+							Loading...
+						</div>
+					) : errorMessage ? (
+						<div
+							className="py-2 px-2 text-sm text-destructive"
+							style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
+						>
+							<span className="mr-2">⚠️</span>
+							{errorMessage}
+						</div>
+					) : node.children && node.children.length > 0 ? (
+						sortTreeNodes(node.children).map((child) => (
+							<TreeItem
+								key={child.path}
+								node={child}
+								depth={depth + 1}
+								onFileSelect={onFileSelect}
+								selectedPath={selectedPath}
+								searchQuery={searchQuery}
+								onLoadChildren={onLoadChildren}
+								onHover={onHover}
+								loadingPaths={loadingPaths}
+								errorPaths={errorPaths}
+							/>
+						))
+					) : null}
 				</div>
 			)}
 		</div>
